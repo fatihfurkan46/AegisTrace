@@ -1,0 +1,7 @@
+# Binaries
+/aegis
+/aegis.exe
+/dist/
+/coverage.out
+
+# Runtime state

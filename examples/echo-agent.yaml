@@ -1,0 +1,10 @@
+name: issue-triage
+version: "1"
+description: Deterministic local example using the echo provider
+entry: classify
+budget:
+  max_steps: 8
+  max_tool_calls: 1
+  max_tokens: 1000
+  timeout: 30s
+permissions:

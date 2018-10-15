@@ -11,3 +11,16 @@ test:
 	go test ./...
 
 race:
+	go test -race ./...
+
+vet:
+	go vet ./...
+
+fmt:
+	gofmt -w $$(find . -name '*.go')
+
+lint:
+	golangci-lint run
+
+check: vet race
+

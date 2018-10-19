@@ -26,3 +26,18 @@ func TestRunCheckpointAndReplay(t *testing.T) {
 	calls := 0
 	registry := provider.NewRegistry()
 	if err := registry.Register("test", provider.Func(func(_ context.Context, request provider.Request) (provider.Response, error) {
+		calls++
+		return provider.Response{Output: request.Input, UsageTokens: 2}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "run.atlog")
+	writer, err := journal.Create(path, "integration-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := aegisruntime.Engine{Artifact: artifact, Providers: registry, Journal: writer, Checkpoints: checkpoint.FileStore{Directory: filepath.Join(dir, "checkpoints")}}
+	result, err := engine.Run(context.Background(), "integration-run", map[string]any{"message": "hello"})
+	if err != nil {
+		t.Fatal(err)

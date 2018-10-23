@@ -7,12 +7,3 @@ budget:
   max_tool_calls: 1
   max_tokens: 0
   timeout: 20s
-permissions:
-  - tool: deployment.release
-steps:
-  - id: prepare
-    kind: emit
-    input:
-      release: ${input.release}
-  - id: authorize
-    kind: approval

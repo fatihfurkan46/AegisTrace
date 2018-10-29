@@ -104,3 +104,109 @@ func verifyCommand(args []string) error {
 	fmt.Printf("verified %s: %d steps, %d edges, %s\n", artifact.Workflow.Name, report.Steps, report.Edges, artifact.Digest)
 	return nil
 }
+
+func runCommand(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	journalPath := fs.String("journal", "run.atlog", "journal path")
+	inputJSON := fs.String("input", "{}", "JSON input")
+	approve := fs.Bool("approve", false, "approve guarded steps")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: aegis run workflow.aegis [options]")
+	}
+	artifact, err := compiler.Load(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(*inputJSON), &input); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	runID, err := randomID()
+	if err != nil {
+		return err
+	}
+	writer, err := journal.Create(*journalPath, runID)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	registry := provider.NewRegistry()
+	_ = registry.Register("echo", provider.Echo{})
+	registerEnvironment(registry)
+	engine := aegisruntime.Engine{Artifact: artifact, Providers: registry, Journal: writer, Checkpoints: checkpoint.FileStore{Directory: ".aegis/checkpoints"}}
+	if *approve {
+		engine.Approver = allowApprover{}
+	}
+	result, err := engine.Run(context.Background(), runID, input)
+	if err != nil {
+		return err
+	}
+	return printJSON(result)
+}
+
+type allowApprover struct{}
+
+func (allowApprover) Approve(_ context.Context, _ workflow.Step, _ map[string]any) error { return nil }
+
+func replayCommand(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: aegis replay run.atlog")
+	}
+	events, err := journal.Load(args[0])
+	if err != nil {
+		return err
+	}
+	result, err := aegisruntime.Replay(events)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("replayed %d events with valid hash chain\n", len(events))
+	return printJSON(result)
+}
+
+func inspectCommand(args []string) error {
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	index := fs.Int("event", -1, "event index")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: aegis inspect run.atlog --event N")
+	}
+	events, err := journal.Load(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if err := journal.Verify(events); err != nil {
+		return err
+	}
+	if *index >= 0 {
+		if *index >= len(events) {
+			return fmt.Errorf("event out of range")
+		}
+		return printJSON(events[*index])
+	}
+	return printJSON(events)
+}
+
+func keygenCommand(args []string) error {
+	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
+	output := fs.String("o", "aegis-signing-key.json", "key path")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	pub, err := proof.GenerateKey(*output)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("created %s\npublic  %x\n", *output, []byte(pub))
+	return nil
+}
+
+func proveCommand(args []string) error {
+	fs := flag.NewFlagSet("prove", flag.ContinueOnError)
+	index := fs.Int("event", -1, "event index")
+	key := fs.String("key", "aegis-signing-key.json", "private key")

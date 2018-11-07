@@ -7,3 +7,6 @@ linters:
     - bodyclose
     - errorlint
     - gosec
+    - misspell
+    - nilerr
+    - revive

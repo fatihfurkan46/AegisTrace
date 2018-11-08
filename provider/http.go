@@ -78,3 +78,43 @@ func (p *HTTPModel) requestBody(r Request) map[string]any {
 	prompt := promptFrom(r.Input)
 	switch p.Style {
 	case Anthropic:
+		return map[string]any{"model": p.Model, "max_tokens": max(1, r.MaxTokens), "messages": []any{map[string]any{"role": "user", "content": prompt}}}
+	case Gemini:
+		return map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": prompt}}}}, "generationConfig": map[string]any{"maxOutputTokens": max(1, r.MaxTokens)}}
+	default:
+		return map[string]any{"model": p.Model, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": max(1, r.MaxTokens)}
+	}
+}
+
+func (p *HTTPModel) parseResponse(raw []byte) (Response, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return Response{}, fmt.Errorf("decode %s response: %w", p.Name, err)
+	}
+	var text string
+	switch p.Style {
+	case Anthropic:
+		text = nestedText(doc, "content", "text")
+	case Gemini:
+		text = geminiText(doc)
+	default:
+		text = openAIText(doc)
+	}
+	if text == "" {
+		return Response{}, fmt.Errorf("%s response contained no text", p.Name)
+	}
+	return Response{Output: text, UsageTokens: usage(doc), Metadata: map[string]string{"provider": p.Name, "model": p.Model}}, nil
+}
+
+func promptFrom(input map[string]any) string {
+	if v, ok := input["prompt"].(string); ok {
+		return v
+	}
+	raw, _ := json.Marshal(input)
+	return string(raw)
+}
+func openAIText(d map[string]any) string {
+	choices, _ := d["choices"].([]any)
+	if len(choices) == 0 {
+		return ""
+	}

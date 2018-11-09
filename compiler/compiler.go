@@ -17,22 +17,3 @@ import (
 func Parse(source []byte) (workflow.Workflow, error) {
 	var w workflow.Workflow
 	dec := yaml.NewDecoder(bytes.NewReader(source))
-	dec.KnownFields(true)
-	if err := dec.Decode(&w); err != nil {
-		return w, fmt.Errorf("parse workflow: %w", err)
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		return w, fmt.Errorf("workflow must contain one YAML document")
-	}
-	normalize(&w)
-	return w, nil
-}
-
-func normalize(w *workflow.Workflow) {
-	if w.Version == "" {
-		w.Version = "1"
-	}
-	if w.Entry == "" && len(w.Steps) > 0 {
-		w.Entry = w.Steps[0].ID
-	}

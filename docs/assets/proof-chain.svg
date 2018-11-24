@@ -28,34 +28,3 @@
     <g>
       <rect x="256" y="78" width="88" height="44" rx="5" fill="#ffffff" stroke="#4a6377"/>
       <text x="300" y="98" fill="#1c2b38">e2</text>
-      <text x="300" y="114" fill="#7c8b98" font-size="10">prev=h1</text>
-    </g>
-    <g>
-      <rect x="372" y="78" width="88" height="44" rx="5" fill="#ffffff" stroke="#4a6377"/>
-      <text x="416" y="98" fill="#1c2b38">e3</text>
-      <text x="416" y="114" fill="#7c8b98" font-size="10">prev=h2</text>
-    </g>
-  </g>
-  <g stroke="#4a6377" stroke-width="1.8" fill="none" marker-end="url(#a)">
-    <line x1="112" y1="100" x2="136" y2="100"/>
-    <line x1="228" y1="100" x2="252" y2="100"/>
-    <line x1="344" y1="100" x2="368" y2="100"/>
-  </g>
-
-  <!-- merkle tree -->
-  <g font-family="monospace" font-size="11" text-anchor="middle">
-    <rect x="66" y="158" width="60" height="30" rx="4" fill="#e4ded0" stroke="#8a7f68"/>
-    <text x="96" y="177" fill="#3a4a57">n01</text>
-    <rect x="298" y="158" width="60" height="30" rx="4" fill="#e4ded0" stroke="#8a7f68"/>
-    <text x="328" y="177" fill="#3a4a57">n23</text>
-    <rect x="182" y="212" width="80" height="32" rx="4" fill="#12352a" stroke="#2f7d5b" stroke-width="2"/>
-    <text x="222" y="228" fill="#bfe6d3" font-size="11">root</text>
-    <text x="222" y="240" fill="#7fbfa1" font-size="9">Ed25519</text>
-  </g>
-  <g stroke="#8a7f68" stroke-width="1.6" fill="none">
-    <path d="M68 122 L96 156"/>
-    <path d="M184 122 L96 156"/>
-    <path d="M300 122 L328 156"/>
-    <path d="M416 122 L328 156"/>
-    <path d="M96 188 L210 210"/>
-    <path d="M328 188 L234 210"/>

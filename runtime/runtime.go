@@ -130,3 +130,136 @@ func (e *Engine) execute(ctx context.Context, runID string, step workflow.Step, 
 	switch step.Kind {
 	case "model", "tool":
 		if step.Kind == "tool" {
+			if result.ToolCalls >= e.Artifact.Workflow.Budget.MaxToolCalls {
+				return nil, 0, fmt.Errorf("tool-call budget exhausted")
+			}
+		}
+		p, err := e.Providers.Get(step.Provider)
+		if err != nil {
+			return nil, 0, err
+		}
+		response, err := p.Execute(ctx, provider.Request{RunID: runID, StepID: step.ID, Action: step.Action, Input: input, MaxTokens: e.Artifact.Workflow.Budget.MaxTokens - result.Tokens})
+		return response.Output, response.UsageTokens, err
+	case "checkpoint":
+		return map[string]any{"checkpoint": step.ID}, 0, nil
+	case "emit":
+		return input, 0, nil
+	default:
+		return nil, 0, fmt.Errorf("unsupported admitted step kind %q", step.Kind)
+	}
+}
+
+func (e *Engine) fail(message string, cause error) error {
+	text := message
+	if cause != nil {
+		text += ": " + cause.Error()
+	}
+	_, _ = e.Journal.Append("run.failed", "", map[string]any{"error": text})
+	return fmt.Errorf("%s", text)
+}
+func (e *Engine) stepFailure(step workflow.Step, cause error) error {
+	return e.fail("resolve step "+step.ID, cause)
+}
+
+func Replay(events []journal.Event) (Result, error) {
+	var result Result
+	if err := journal.Verify(events); err != nil {
+		return result, err
+	}
+	result.Outputs = make(map[string]any)
+	for _, event := range events {
+		if result.RunID == "" {
+			result.RunID = event.RunID
+		}
+		switch event.Type {
+		case "step.completed":
+			result.Steps++
+			result.Output = event.Data["output"]
+			result.Outputs[event.StepID] = result.Output
+		case "run.completed":
+			result.Output = event.Data["output"]
+			result.ToolCalls = eventInt(event.Data["tools"])
+			result.Tokens = eventInt(event.Data["tokens"])
+		case "run.failed":
+			return result, fmt.Errorf("recorded run failed: %v", event.Data["error"])
+		}
+	}
+	return result, nil
+}
+
+func eventInt(value any) int {
+	switch number := value.(type) {
+	case int:
+		return number
+	case int64:
+		return int(number)
+	case float64:
+		return int(number)
+	default:
+		return 0
+	}
+}
+
+func resolveMap(values map[string]any, input, outputs map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		resolved, err := resolve(value, input, outputs)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", key, err)
+		}
+		out[key] = resolved
+	}
+	return out, nil
+}
+func resolve(value any, input, outputs map[string]any) (any, error) {
+	switch v := value.(type) {
+	case string:
+		if !strings.HasPrefix(v, "${") || !strings.HasSuffix(v, "}") {
+			return v, nil
+		}
+		path := strings.TrimSuffix(strings.TrimPrefix(v, "${"), "}")
+		if strings.HasPrefix(path, "input.") {
+			value, ok := lookup(input, strings.TrimPrefix(path, "input."))
+			if !ok {
+				return nil, fmt.Errorf("unknown input %q", path)
+			}
+			return value, nil
+		}
+		if strings.HasPrefix(path, "steps.") {
+			value, ok := outputs[strings.TrimPrefix(path, "steps.")]
+			if !ok {
+				return nil, fmt.Errorf("unknown step output %q", path)
+			}
+			return value, nil
+		}
+		return nil, fmt.Errorf("unsupported expression %q", path)
+	case map[string]any:
+		return resolveMap(v, input, outputs)
+	case []any:
+		out := make([]any, len(v))
+		for i := range v {
+			item, err := resolve(v[i], input, outputs)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = item
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+func lookup(values map[string]any, path string) (any, bool) {
+	var current any = values
+	for _, part := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = object[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}

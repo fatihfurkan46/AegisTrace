@@ -53,3 +53,59 @@ type Step struct {
 	ID               string         `json:"id" yaml:"id"`
 	Kind             string         `json:"kind" yaml:"kind"`
 	Provider         string         `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Action           string         `json:"action,omitempty" yaml:"action,omitempty"`
+	Input            map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
+	Next             string         `json:"next,omitempty" yaml:"next,omitempty"`
+	OnError          string         `json:"on_error,omitempty" yaml:"on_error,omitempty"`
+	RequiresApproval bool           `json:"requires_approval,omitempty" yaml:"requires_approval,omitempty"`
+}
+
+type Workflow struct {
+	Name        string            `json:"name" yaml:"name"`
+	Version     string            `json:"version" yaml:"version"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Entry       string            `json:"entry" yaml:"entry"`
+	Budget      Budget            `json:"budget" yaml:"budget"`
+	Permissions []Permission      `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Steps       []Step            `json:"steps" yaml:"steps"`
+}
+
+type Artifact struct {
+	Magic      string    `json:"magic"`
+	Format     string    `json:"format"`
+	Digest     string    `json:"digest"`
+	CompiledAt time.Time `json:"compiled_at"`
+	Workflow   Workflow  `json:"workflow"`
+}
+
+func Digest(w Workflow) (string, error) {
+	data, err := json.Marshal(w)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize workflow: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func NewArtifact(w Workflow, now time.Time) (Artifact, error) {
+	digest, err := Digest(w)
+	if err != nil {
+		return Artifact{}, err
+	}
+	return Artifact{Magic: ArtifactMagic, Format: ArtifactVersion, Digest: digest, CompiledAt: now.UTC(), Workflow: w}, nil
+}
+
+func (a Artifact) ValidateSeal() error {
+	if a.Magic != ArtifactMagic || a.Format != ArtifactVersion {
+		return fmt.Errorf("unsupported artifact %q/%q", a.Magic, a.Format)
+	}
+	digest, err := Digest(a.Workflow)
+	if err != nil {
+		return err
+	}
+	if digest != a.Digest {
+		return fmt.Errorf("artifact digest mismatch: have %s, computed %s", a.Digest, digest)
+	}
+	return nil
+}

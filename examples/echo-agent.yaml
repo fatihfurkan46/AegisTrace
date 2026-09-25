@@ -8,3 +8,24 @@ budget:
   max_tokens: 1000
   timeout: 30s
 permissions:
+  - tool: ticket.create
+metadata:
+  owner: platform-engineering
+steps:
+  - id: classify
+    kind: model
+    provider: echo
+    input:
+      prompt: ${input.message}
+  - id: preserve
+    kind: checkpoint
+  - id: create
+    kind: tool
+    provider: echo
+    action: ticket.create
+    input:
+      classification: ${steps.classify}
+  - id: result
+    kind: emit
+    input:
+      ticket: ${steps.create}

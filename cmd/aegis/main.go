@@ -104,3 +104,216 @@ func verifyCommand(args []string) error {
 	fmt.Printf("verified %s: %d steps, %d edges, %s\n", artifact.Workflow.Name, report.Steps, report.Edges, artifact.Digest)
 	return nil
 }
+
+func runCommand(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	journalPath := fs.String("journal", "run.atlog", "journal path")
+	inputJSON := fs.String("input", "{}", "JSON input")
+	approve := fs.Bool("approve", false, "approve guarded steps")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: aegis run workflow.aegis [options]")
+	}
+	artifact, err := compiler.Load(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(*inputJSON), &input); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
+	runID, err := randomID()
+	if err != nil {
+		return err
+	}
+	writer, err := journal.Create(*journalPath, runID)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	registry := provider.NewRegistry()
+	_ = registry.Register("echo", provider.Echo{})
+	registerEnvironment(registry)
+	engine := aegisruntime.Engine{Artifact: artifact, Providers: registry, Journal: writer, Checkpoints: checkpoint.FileStore{Directory: ".aegis/checkpoints"}}
+	if *approve {
+		engine.Approver = allowApprover{}
+	}
+	result, err := engine.Run(context.Background(), runID, input)
+	if err != nil {
+		return err
+	}
+	return printJSON(result)
+}
+
+type allowApprover struct{}
+
+func (allowApprover) Approve(_ context.Context, _ workflow.Step, _ map[string]any) error { return nil }
+
+func replayCommand(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: aegis replay run.atlog")
+	}
+	events, err := journal.Load(args[0])
+	if err != nil {
+		return err
+	}
+	result, err := aegisruntime.Replay(events)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("replayed %d events with valid hash chain\n", len(events))
+	return printJSON(result)
+}
+
+func inspectCommand(args []string) error {
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	index := fs.Int("event", -1, "event index")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: aegis inspect run.atlog --event N")
+	}
+	events, err := journal.Load(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if err := journal.Verify(events); err != nil {
+		return err
+	}
+	if *index >= 0 {
+		if *index >= len(events) {
+			return fmt.Errorf("event out of range")
+		}
+		return printJSON(events[*index])
+	}
+	return printJSON(events)
+}
+
+func keygenCommand(args []string) error {
+	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
+	output := fs.String("o", "aegis-signing-key.json", "key path")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	pub, err := proof.GenerateKey(*output)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("created %s\npublic  %x\n", *output, []byte(pub))
+	return nil
+}
+
+func proveCommand(args []string) error {
+	fs := flag.NewFlagSet("prove", flag.ContinueOnError)
+	index := fs.Int("event", -1, "event index")
+	key := fs.String("key", "aegis-signing-key.json", "private key")
+	output := fs.String("o", "proof.json", "proof path")
+	if err := fs.Parse(interspersed(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || *index < 0 {
+		return fmt.Errorf("usage: aegis prove run.atlog --event N --key key.json [-o proof.json]")
+	}
+	events, err := journal.Load(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	private, err := proof.LoadPrivate(*key)
+	if err != nil {
+		return err
+	}
+	attestation, err := proof.Create(events, *index, private)
+	if err != nil {
+		return err
+	}
+	data, _ := json.MarshalIndent(attestation, "", "  ")
+	if err := os.WriteFile(*output, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("created %s for event %d\nroot    %s\n", *output, *index, attestation.Root)
+	return nil
+}
+
+func verifyProofCommand(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: aegis verify-proof proof.json")
+	}
+	data, err := os.ReadFile(args[0])
+	if err != nil {
+		return err
+	}
+	var attestation proof.Attestation
+	if err := json.Unmarshal(data, &attestation); err != nil {
+		return err
+	}
+	if err := proof.Verify(attestation); err != nil {
+		return err
+	}
+	fmt.Printf("verified event %d/%d, root %s\n", attestation.EventIndex, attestation.EventCount, attestation.Root)
+	return nil
+}
+
+func registerEnvironment(registry *provider.Registry) {
+	if endpoint := os.Getenv("AEGIS_OPENAI_ENDPOINT"); endpoint != "" {
+		_ = registry.Register("openai", &provider.HTTPModel{Name: "openai", Style: provider.OpenAI, Endpoint: endpoint, APIKey: os.Getenv("OPENAI_API_KEY"), Model: env("AEGIS_OPENAI_MODEL", "gpt-4o-mini")})
+	}
+	if endpoint := os.Getenv("AEGIS_ANTHROPIC_ENDPOINT"); endpoint != "" {
+		_ = registry.Register("anthropic", &provider.HTTPModel{Name: "anthropic", Style: provider.Anthropic, Endpoint: endpoint, APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: env("AEGIS_ANTHROPIC_MODEL", "claude-sonnet-4-20250514")})
+	}
+	if endpoint := os.Getenv("AEGIS_GEMINI_ENDPOINT"); endpoint != "" {
+		_ = registry.Register("gemini", &provider.HTTPModel{Name: "gemini", Style: provider.Gemini, Endpoint: endpoint, APIKey: os.Getenv("GEMINI_API_KEY"), Model: env("AEGIS_GEMINI_MODEL", "gemini-2.5-flash")})
+	}
+	if endpoint := os.Getenv("AEGIS_OLLAMA_ENDPOINT"); endpoint != "" {
+		_ = registry.Register("ollama", &provider.HTTPModel{Name: "ollama", Style: provider.OpenAI, Endpoint: endpoint, Model: env("AEGIS_OLLAMA_MODEL", "llama3.2")})
+	}
+	if endpoint := os.Getenv("AEGIS_MCP_ENDPOINT"); endpoint != "" {
+		_ = registry.Register("mcp", &provider.MCP{Endpoint: endpoint, Token: os.Getenv("AEGIS_MCP_TOKEN")})
+	}
+}
+
+func randomID() (string, error) {
+	raw := make([]byte, 12)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+func printJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+func env(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+func usage() {
+	fmt.Fprintln(os.Stderr, "AegisTrace", version, "— verifiable AI agent runtime\n\nCommands: compile verify run replay inspect keygen prove verify-proof version")
+}
+
+func interspersed(args []string) []string {
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--approve" || arg == "-approve" {
+			flags = append(flags, arg)
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			if !strings.Contains(arg, "=") && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		positional = append(positional, arg)
+	}
+	return append(flags, positional...)
+}

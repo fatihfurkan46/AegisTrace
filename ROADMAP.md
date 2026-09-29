@@ -15,3 +15,21 @@
 - [ ] Encrypted journal envelopes
 - [ ] Resume command backed by validated checkpoints
 - [ ] Structured secret-redaction hooks
+- [ ] OpenTelemetry traces and metrics
+- [ ] Provider conformance suite and retry policies
+- [ ] Stable library API review
+
+## 0.3 — Distributed execution
+
+- [ ] PostgreSQL state and lease backend
+- [ ] Object-store checkpoint backend
+- [ ] Signed worker identity and capability delegation
+- [ ] Scheduler and worker daemon
+- [ ] Administrative API
+
+## Future research
+
+- Compact verified workflow bytecode
+- Hardware-backed attestation keys
+- Hybrid post-quantum proof profiles using standardized libraries
+- Transparency-log publication and witness cosigning

@@ -69,3 +69,75 @@ func Verify(w workflow.Workflow) Report {
 	allowedKinds := map[string]bool{"model": true, "tool": true, "approval": true, "checkpoint": true, "emit": true}
 	for i, s := range w.Steps {
 		path := fmt.Sprintf("steps[%d]", i)
+		if s.ID == "" {
+			add(path+".id", "is required")
+			continue
+		}
+		if _, exists := steps[s.ID]; exists {
+			add(path+".id", "duplicate id "+s.ID)
+		}
+		steps[s.ID] = s
+		if !allowedKinds[s.Kind] {
+			add(path+".kind", "must be model, tool, approval, checkpoint, or emit")
+		}
+		if (s.Kind == "model" || s.Kind == "tool") && s.Provider == "" {
+			add(path+".provider", "is required")
+		}
+		if s.Kind == "tool" {
+			if s.Action == "" {
+				add(path+".action", "is required")
+			}
+			if !permissions[s.Action] && !permissions["*"] {
+				add(path+".action", "tool is not permitted")
+			}
+		}
+	}
+	if _, ok := steps[w.Entry]; !ok {
+		add("entry", "does not reference a step")
+	}
+	for i, s := range w.Steps {
+		for field, target := range map[string]string{"next": s.Next, "on_error": s.OnError} {
+			if target != "" {
+				r.Edges++
+				if _, ok := steps[target]; !ok {
+					add(fmt.Sprintf("steps[%d].%s", i, field), "unknown target "+target)
+				}
+			}
+		}
+	}
+	if len(r.Issues) > 0 {
+		return r
+	}
+	verifyGraph(w.Entry, steps, &r)
+	return r
+}
+
+func verifyGraph(entry string, steps map[string]workflow.Step, r *Report) {
+	state := make(map[string]uint8)
+	reachable := make(map[string]bool)
+	var visit func(string)
+	visit = func(id string) {
+		if state[id] == 1 {
+			r.Issues = append(r.Issues, Issue{"steps", "cycle detected at " + id})
+			return
+		}
+		if state[id] == 2 {
+			return
+		}
+		state[id], reachable[id] = 1, true
+		s := steps[id]
+		if s.Next != "" {
+			visit(s.Next)
+		}
+		if s.OnError != "" {
+			visit(s.OnError)
+		}
+		state[id] = 2
+	}
+	visit(entry)
+	for id := range steps {
+		if !reachable[id] {
+			r.Issues = append(r.Issues, Issue{"steps." + id, "is unreachable"})
+		}
+	}
+}

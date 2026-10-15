@@ -34,3 +34,39 @@ type Registry struct {
 	providers map[string]Provider
 }
 
+func NewRegistry() *Registry { return &Registry{providers: make(map[string]Provider)} }
+func (r *Registry) Register(name string, p Provider) error {
+	if name == "" || p == nil {
+		return fmt.Errorf("provider name and implementation are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.providers[name] = p
+	return nil
+}
+func (r *Registry) Get(name string) (Provider, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.providers[name]
+	if !ok {
+		return nil, fmt.Errorf("provider %q is not registered", name)
+	}
+	return p, nil
+}
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Echo is deterministic and useful for local workflows and tests.
+type Echo struct{}
+
+func (Echo) Execute(_ context.Context, request Request) (Response, error) {
+	return Response{Output: map[string]any{"action": request.Action, "input": request.Input}, Metadata: map[string]string{"provider": "echo"}}, nil
+}

@@ -31,3 +31,6 @@ smoke: build
 clean:
 	rm -f $(BINARY) $(BINARY).exe smoke.aegis run.atlog proof.json
 	rm -rf .aegis dist
+
+install:
+	go install ./cmd/aegis

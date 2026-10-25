@@ -22,7 +22,7 @@ fmt:
 lint:
 	golangci-lint run
 
-check: vet race
+check: vet race test
 
 smoke: build
 	./$(BINARY) compile examples/echo-agent.yaml -o smoke.aegis
